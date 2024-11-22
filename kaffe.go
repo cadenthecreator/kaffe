@@ -47,43 +47,43 @@ type TxStateUpdate struct {
 	eventType TxStateUpdateType
 }
 
-func produceTask(producer sarama.SyncProducer, topic, key, task string) {
+func produceEvent(producer sarama.SyncProducer, topic, key, Event string) {
 	msg := &sarama.ProducerMessage{
 		Topic: topic,
 		Key:   sarama.StringEncoder(key), // Ensures messages with the same key go to the same partition
-		Value: sarama.StringEncoder(task),
+		Value: sarama.StringEncoder(Event),
 	}
 	partition, offset, err := producer.SendMessage(msg)
 	if err != nil {
-		log.Fatalf("Failed to send task: %s", err)
+		log.Fatalf("Failed to send Event: %s", err)
 	}
-	log.Printf("Task sent to partition %d at offset %d", partition, offset)
+	log.Printf("Event sent to partition %d at offset %d", partition, offset)
 }
 
-type TaskConsumer struct {
-	ProcessTask func(key, value string) // Define task processing logic
+type EventConsumer struct {
+	ProcessEvent func(key, value string) // Define Event processing logic
 }
 
-func (c *TaskConsumer) Setup(_ sarama.ConsumerGroupSession) error {
+func (c *EventConsumer) Setup(_ sarama.ConsumerGroupSession) error {
 	log.Println("Consumer group session started")
 	return nil
 }
 
-func (c *TaskConsumer) Cleanup(_ sarama.ConsumerGroupSession) error {
+func (c *EventConsumer) Cleanup(_ sarama.ConsumerGroupSession) error {
 	log.Println("Consumer group session ended")
 	return nil
 }
 
-func (c *TaskConsumer) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
+func (c *EventConsumer) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	for msg := range claim.Messages() {
-		log.Printf("Task received: key=%s, value=%s", string(msg.Key), string(msg.Value))
-		c.ProcessTask(string(msg.Key), string(msg.Value))
+		log.Printf("Event received: key=%s, value=%s", string(msg.Key), string(msg.Value))
+		c.ProcessEvent(string(msg.Key), string(msg.Value))
 		sess.MarkMessage(msg, "") // Commit offset after processing
 	}
 	return nil
 }
 
-func consumeTasks(brokers []string, groupID, topic string, processTask func(key, value string)) {
+func consumeEvents(brokers []string, groupID, topic string, processEvent func(key, value string)) {
 	config := sarama.NewConfig()
 	config.Version = sarama.V2_8_0_0 // Use the appropriate Kafka version
 	config.Consumer.Group.Rebalance.Strategy = sarama.BalanceStrategyRange
@@ -95,11 +95,11 @@ func consumeTasks(brokers []string, groupID, topic string, processTask func(key,
 	}
 	defer consumerGroup.Close()
 
-	handler := &TaskConsumer{ProcessTask: processTask}
+	handler := &EventConsumer{ProcessEvent: processEvent}
 
 	for {
 		if err := consumerGroup.Consume(context.Background(), []string{topic}, handler); err != nil {
-			log.Fatalf("Error consuming tasks: %s", err)
+			log.Fatalf("Error consuming Events: %s", err)
 		}
 	}
 }
