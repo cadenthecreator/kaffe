@@ -9,7 +9,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
 )
 
-type OutputEventType int8
+type DeliveryEventType int8
 type BidEventType int8
 type TxStateUpdateType int8
 
@@ -18,10 +18,10 @@ const (
 	BidResultEvent BidEventType = 0
 	PlaybackEvent  BidEventType = 1
 
-	// OutputEvent types
-	None            OutputEventType = 0
-	ImpressionEvent OutputEventType = 1
-	CompletionEvent OutputEventType = 2
+	// DeliveryEvent types
+	None            DeliveryEventType = 0
+	ImpressionEvent DeliveryEventType = 1
+	CompletionEvent DeliveryEventType = 2
 
 	//TxStateUpdate types
 	NoUpdate  TxStateUpdateType = 0
@@ -35,9 +35,9 @@ type BidEvent struct {
 	eventType BidEventType
 }
 
-type OutputEvent struct {
+type DeliveryEvent struct {
 	cmpid     string
-	eventType OutputEventType
+	eventType DeliveryEventType
 }
 
 type TxStateUpdate struct {
@@ -111,10 +111,10 @@ func loadFromTxStateLog(conn *kafgo.Conn, partition int, topic string) map[strin
 	return txStateLog
 }
 
-func processBidEvent(TxID string, event BidEvent, txStateLog map[string]string) (OutputEvent, TxStateUpdate) {
+func processBidEvent(TxID string, event BidEvent, txStateLog map[string]string) (DeliveryEvent, TxStateUpdate) {
 	_, hastx := txStateLog[TxID]
 	if event.eventType == BidResultEvent {
-		return OutputEvent{
+		return DeliveryEvent{
 				cmpid:     event.cmpid,
 				eventType: None,
 			}, TxStateUpdate{
@@ -124,7 +124,7 @@ func processBidEvent(TxID string, event BidEvent, txStateLog map[string]string) 
 			}
 
 	} else if event.quart == 0 && hastx {
-		return OutputEvent{
+		return DeliveryEvent{
 				cmpid:     txStateLog[TxID],
 				eventType: ImpressionEvent,
 			}, TxStateUpdate{
@@ -133,7 +133,7 @@ func processBidEvent(TxID string, event BidEvent, txStateLog map[string]string) 
 				eventType: NoUpdate,
 			}
 	} else if event.quart == 4 && hastx {
-		return OutputEvent{
+		return DeliveryEvent{
 				cmpid:     txStateLog[TxID],
 				eventType: CompletionEvent,
 			}, TxStateUpdate{
@@ -142,7 +142,7 @@ func processBidEvent(TxID string, event BidEvent, txStateLog map[string]string) 
 				eventType: Tombstone,
 			}
 	}
-	return OutputEvent{
+	return DeliveryEvent{
 			cmpid:     event.cmpid,
 			eventType: None,
 		}, TxStateUpdate{
