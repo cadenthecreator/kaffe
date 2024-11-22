@@ -47,21 +47,40 @@ type TxStateUpdate struct {
 	eventType TxStateUpdateType
 }
 
-func produceEvent(producer sarama.SyncProducer, topic, key, Event string) {
+func produceEvent(producer sarama.SyncProducer, topic, key, value string) {
+	// Begin transaction
+	if err := producer.BeginTxn(); err != nil {
+		log.Fatalf("Failed to begin transaction: %s", err)
+	}
+	log.Println("Transaction started for producing event")
+
+	// Prepare the message
 	msg := &sarama.ProducerMessage{
 		Topic: topic,
-		Key:   sarama.StringEncoder(key), // Ensures messages with the same key go to the same partition
-		Value: sarama.StringEncoder(Event),
+		Key:   sarama.StringEncoder(key),
+		Value: sarama.StringEncoder(value),
 	}
-	partition, offset, err := producer.SendMessage(msg)
+
+	// Send the message
+	_, _, err := producer.SendMessage(msg)
 	if err != nil {
-		log.Fatalf("Failed to send Event: %s", err)
+		// Abort the transaction if sending fails
+		if abortErr := producer.AbortTxn(); abortErr != nil {
+			log.Fatalf("Failed to abort transaction: %s", abortErr)
+		}
+		log.Fatalf("Failed to send event: %s", err)
 	}
-	log.Printf("Event sent to partition %d at offset %d", partition, offset)
+	log.Printf("Event sent to topic %s with key=%s and value=%s", topic, key, value)
+
+	// Commit the transaction
+	if err := producer.CommitTxn(); err != nil {
+		log.Fatalf("Failed to commit transaction: %s", err)
+	}
+	log.Println("Transaction committed for event")
 }
 
 type EventConsumer struct {
-	ProcessEvent func(key, value string) // Define Event processing logic
+	ProcessEvent func(key, value string)
 }
 
 func (c *EventConsumer) Setup(_ sarama.ConsumerGroupSession) error {
@@ -83,23 +102,13 @@ func (c *EventConsumer) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sar
 	return nil
 }
 
-func consumeEvents(brokers []string, groupID, topic string, processEvent func(key, value string)) {
-	config := sarama.NewConfig()
-	config.Version = sarama.V2_8_0_0 // Use the appropriate Kafka version
-	config.Consumer.Group.Rebalance.Strategy = sarama.BalanceStrategyRange
-	config.Consumer.Offsets.Initial = sarama.OffsetOldest
-
-	consumerGroup, err := sarama.NewConsumerGroup(brokers, groupID, config)
-	if err != nil {
-		log.Fatalf("Failed to create consumer group: %s", err)
-	}
-	defer consumerGroup.Close()
-
+func consumeEvents(consumerGroup sarama.ConsumerGroup, topic string, processEvent func(key, value string)) {
 	handler := &EventConsumer{ProcessEvent: processEvent}
 
 	for {
+		// Start consuming from the topic
 		if err := consumerGroup.Consume(context.Background(), []string{topic}, handler); err != nil {
-			log.Fatalf("Error consuming Events: %s", err)
+			log.Fatalf("Error consuming events: %s", err)
 		}
 	}
 }
@@ -127,11 +136,24 @@ func terminateKafkaContainer(container *kafka.KafkaContainer) {
 }
 
 // Connect to Kafka container and return both producer and consumer
-func connectToKafkaContainer(ctx context.Context, container *kafka.KafkaContainer, transactionalID string) (sarama.SyncProducer, sarama.Consumer) {
+
+func waitForKafkaReadiness(brokers []string) error {
+	config := sarama.NewConfig()
+	client, err := sarama.NewClient(brokers, config)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	log.Println("Kafka is ready")
+	return nil
+}
+
+func connectToKafkaContainer(ctx context.Context, container *kafka.KafkaContainer, transactionalID, groupID string) (sarama.SyncProducer, sarama.ConsumerGroup) {
 	brokers, err := container.Brokers(ctx)
 	if err != nil {
-		log.Fatalf("failed to get brokers: %s", err)
+		log.Fatalf("Failed to get brokers: %s", err)
 	}
+	log.Printf("Kafka brokers: %v", brokers)
 
 	// Create transactional producer
 	producerConfig := sarama.NewConfig()
@@ -140,23 +162,27 @@ func connectToKafkaContainer(ctx context.Context, container *kafka.KafkaContaine
 	producerConfig.Producer.Transaction.ID = transactionalID
 	producerConfig.Producer.RequiredAcks = sarama.WaitForAll
 	producerConfig.Net.MaxOpenRequests = 1
+
 	producer, err := sarama.NewSyncProducer(brokers, producerConfig)
 	if err != nil {
-		log.Fatalf("failed to create transactional producer: %s", err)
+		log.Fatalf("Failed to create transactional producer: %s", err)
 	}
 	log.Println("Transactional Kafka producer connected")
 
-	// Create consumer
+	// Create consumer group
 	consumerConfig := sarama.NewConfig()
-	consumerConfig.Consumer.Return.Errors = true
-	consumerConfig.Consumer.IsolationLevel = sarama.ReadCommitted // Only read committed messages
-	consumer, err := sarama.NewConsumer(brokers, consumerConfig)
-	if err != nil {
-		log.Fatalf("failed to create consumer: %s", err)
-	}
-	log.Println("Kafka consumer connected")
+	consumerConfig.Version = sarama.V2_8_0_0
+	consumerConfig.Consumer.Group.Rebalance.Strategy = sarama.NewBalanceStrategyRange()
+	consumerConfig.Consumer.Offsets.Initial = sarama.OffsetOldest
+	consumerConfig.Consumer.IsolationLevel = sarama.ReadCommitted // Read committed messages only
 
-	return producer, consumer
+	consumerGroup, err := sarama.NewConsumerGroup(brokers, groupID, consumerConfig)
+	if err != nil {
+		log.Fatalf("Failed to create consumer group: %s", err)
+	}
+	log.Println("Kafka consumer group connected")
+
+	return producer, consumerGroup
 }
 
 // Ensure the topic is created with the given number of partitions
@@ -229,9 +255,11 @@ func executeTxStateUpdate(txStateUpdate TxStateUpdate, txStateLog map[string]str
 
 func loadFromTxStateLog(consumer sarama.Consumer, topic string, partition int32) map[string]string {
 	log.Println("Starting loadFromTxStateLog...")
+
+	// Consume messages from the specified partition
 	partitionConsumer, err := consumer.ConsumePartition(topic, partition, sarama.OffsetOldest)
 	if err != nil {
-		log.Fatalf("failed to consume partition: %s", err)
+		log.Fatalf("Failed to consume partition: %s", err)
 	}
 	defer partitionConsumer.Close()
 
@@ -253,6 +281,34 @@ func loadFromTxStateLog(consumer sarama.Consumer, topic string, partition int32)
 			return txStateLog
 		}
 	}
+}
+
+func loadFromTxStateLogWithGroup(consumerGroup sarama.ConsumerGroup, topic string, processMessage func(key, value string)) map[string]string {
+	log.Println("Starting loadFromTxStateLogWithGroup...")
+
+	stateLog := make(map[string]string)
+	handler := &EventConsumer{
+		ProcessEvent: func(key, value string) {
+			if value == "" {
+				delete(stateLog, key)
+			} else {
+				stateLog[key] = value
+			}
+		},
+	}
+
+	// Start consuming messages
+	go func() {
+		for {
+			if err := consumerGroup.Consume(context.Background(), []string{topic}, handler); err != nil {
+				log.Fatalf("Error consuming messages: %s", err)
+			}
+		}
+	}()
+
+	// Allow some time for processing
+	time.Sleep(5 * time.Second)
+	return stateLog
 }
 
 // Process a bid event and update transaction state
@@ -295,4 +351,3 @@ func processBidEvent(TxID string, event BidEvent, txStateLog map[string]string) 
 			eventType: NoUpdate,
 		}
 }
-
