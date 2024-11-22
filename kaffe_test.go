@@ -42,17 +42,29 @@ func TestComplete(t *testing.T) {
 	}
 }
 
+func TestMissing(t *testing.T) {
+	txStateLog := map[string]string{}
+	event, stateUpdate := processBidEvent("TestId", BidEvent{
+		quart:     4,
+		cmpid:     "",
+		eventType: PlaybackEvent,
+	}, txStateLog)
+	if !(event.eventType == None && stateUpdate.eventType == NoUpdate) {
+		t.Errorf("Expected 0 and 0 but got %s and %s", strconv.Itoa(int(event.eventType)), strconv.Itoa(int(stateUpdate.eventType)))
+	}
+}
+
 func TestIntegration(t *testing.T) {
 	ctx := context.Background()
 	kafkaContainer := spinUpKafkaContainer(ctx)
 	defer terminateKafkaContainer(kafkaContainer)
 	prod, cons := connectToKafkaContainer(ctx, kafkaContainer, "txStateLog")
-	txStateLog := loadFromTxStateLog(cons, "txStateLog", 0)
 	executeTxStateUpdate(TxStateUpdate{
 		key:       "TestId",
 		value:     "test",
 		eventType: Update,
-	}, txStateLog, prod, "txStateLog")
+	}, map[string]string{}, prod, "txStateLog")
+	txStateLog := loadFromTxStateLog(cons, "txStateLog", 0)
 	event, stateUpdate := processBidEvent("TestId", BidEvent{
 		quart:     0,
 		cmpid:     "",
