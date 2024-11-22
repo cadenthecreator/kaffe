@@ -151,3 +151,24 @@ func processBidEvent(TxID string, event BidEvent, txStateLog map[string]string) 
 			eventType: NoUpdate,
 		}
 }
+
+func executeTxStateUpdate(txStateUpdate TxStateUpdate, txStateLog map[string]string, conn *kafgo.Conn, topic string, patrition int) {
+	if txStateUpdate.eventType == Update {
+		txStateLog[txStateUpdate.key] = txStateUpdate.value
+		msg := kafgo.Message{
+			Key:       []byte(txStateUpdate.key),
+			Value:     []byte(txStateUpdate.value),
+			Topic:     topic,
+			Partition: patrition,
+		}
+		conn.WriteMessages(msg)
+	} else if txStateUpdate.eventType == Tombstone {
+		delete(txStateLog, txStateUpdate.key)
+		msg := kafgo.Message{
+			Key:       []byte(txStateUpdate.key),
+			Topic:     topic,
+			Partition: patrition,
+		}
+		conn.WriteMessages(msg)
+	}
+}
