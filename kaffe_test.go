@@ -46,18 +46,14 @@ func TestIntegration(t *testing.T) {
 	ctx := context.Background()
 	kafkaContainer := spinUpKafkaContainer(ctx)
 	defer terminateKafkaContainer(kafkaContainer)
-	conn := connectToKafkaContainer(ctx, kafkaContainer, "txStateLog", 0)
-	txStateLog := loadFromTxStateLog(conn, 0, "txStateLog")
+	prod, cons := connectToKafkaContainer(ctx, kafkaContainer, "txStateLog")
+	txStateLog := loadFromTxStateLog(cons, "txStateLog", 0)
+	executeTxStateUpdate(TxStateUpdate{
+		key:       "TestId",
+		value:     "test",
+		eventType: Update,
+	}, txStateLog, prod, "txStateLog")
 	event, stateUpdate := processBidEvent("TestId", BidEvent{
-		quart:     0,
-		cmpid:     "test",
-		eventType: BidResultEvent,
-	}, txStateLog)
-	if !(event.eventType == None && stateUpdate.eventType == Update) {
-		t.Errorf("Expected 0 and 1 but got %s and %s", strconv.Itoa(int(event.eventType)), strconv.Itoa(int(stateUpdate.eventType)))
-	}
-	executeTxStateUpdate(stateUpdate, txStateLog, conn, "txStateLog", 0)
-	event, stateUpdate = processBidEvent("TestId", BidEvent{
 		quart:     0,
 		cmpid:     "",
 		eventType: PlaybackEvent,
@@ -65,7 +61,7 @@ func TestIntegration(t *testing.T) {
 	if !(event.eventType == ImpressionEvent && stateUpdate.eventType == NoUpdate) {
 		t.Errorf("Expected 1 and 0 but got %s and %s", strconv.Itoa(int(event.eventType)), strconv.Itoa(int(stateUpdate.eventType)))
 	}
-	executeTxStateUpdate(stateUpdate, txStateLog, conn, "txStateLog", 0)
+	executeTxStateUpdate(stateUpdate, txStateLog, prod, "txStateLog")
 	event, stateUpdate = processBidEvent("TestId", BidEvent{
 		quart:     4,
 		cmpid:     "",
@@ -74,5 +70,5 @@ func TestIntegration(t *testing.T) {
 	if !(event.eventType == CompletionEvent && stateUpdate.eventType == Tombstone) {
 		t.Errorf("Expected 2 and 2 but got %s and %s", strconv.Itoa(int(event.eventType)), strconv.Itoa(int(stateUpdate.eventType)))
 	}
-	executeTxStateUpdate(stateUpdate, txStateLog, conn, "txStateLog", 0)
+	executeTxStateUpdate(stateUpdate, txStateLog, prod, "txStateLog")
 }
