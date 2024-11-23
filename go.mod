@@ -1,9 +1,10 @@
 module kaffe
 
-go 1.22
+go 1.23
 
 require (
 	github.com/IBM/sarama v1.43.3
+	github.com/leavez/go-optional v0.1.0
 	github.com/testcontainers/testcontainers-go v0.34.0
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.34.0
 )
