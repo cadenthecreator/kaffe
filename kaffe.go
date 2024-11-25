@@ -2,12 +2,13 @@ package kaffe
 
 import (
 	"context"
-	"github.com/IBM/sarama"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/kafka"
 	"log"
 	"strings"
 	"time"
+
+	"github.com/IBM/sarama"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/kafka"
 )
 
 type DeliveryEventType int8
@@ -31,14 +32,14 @@ const (
 )
 
 type BidEvent struct {
-	cmpid     string
-	quart     int8
-	eventType BidEventType
+	CampaignID string       `json:"cmpid"`
+	Quart      int8         `json:"quart"`
+	EventType  BidEventType `json:"event_type"`
 }
 
 type DeliveryEvent struct {
-	cmpid     string
-	eventType DeliveryEventType
+	CampaignID string            `json:"campaign_id"`
+	EventType  DeliveryEventType `json:"event_type"`
 }
 
 type TxStateUpdate struct {
@@ -314,28 +315,28 @@ func loadFromTxStateLogWithGroup(consumerGroup sarama.ConsumerGroup, topic strin
 // Process a bid event and update transaction state
 func processBidEvent(TxID string, event BidEvent, txStateLog map[string]string) (DeliveryEvent, TxStateUpdate) {
 	_, hasTx := txStateLog[TxID]
-	if event.eventType == BidResultEvent {
+	if event.EventType == BidResultEvent {
 		return DeliveryEvent{
-				cmpid:     event.cmpid,
-				eventType: None,
+				CampaignID: event.CampaignID,
+				EventType:  None,
 			}, TxStateUpdate{
 				key:       TxID,
-				value:     event.cmpid,
+				value:     event.CampaignID,
 				eventType: Update,
 			}
-	} else if event.quart == 0 && hasTx {
+	} else if event.Quart == 0 && hasTx {
 		return DeliveryEvent{
-				cmpid:     txStateLog[TxID],
-				eventType: ImpressionEvent,
+				CampaignID: txStateLog[TxID],
+				EventType:  ImpressionEvent,
 			}, TxStateUpdate{
 				key:       "",
 				value:     "",
 				eventType: NoUpdate,
 			}
-	} else if event.quart == 4 && hasTx {
+	} else if event.Quart == 4 && hasTx {
 		return DeliveryEvent{
-				cmpid:     txStateLog[TxID],
-				eventType: CompletionEvent,
+				CampaignID: txStateLog[TxID],
+				EventType:  CompletionEvent,
 			}, TxStateUpdate{
 				key:       TxID,
 				value:     "",
@@ -343,8 +344,8 @@ func processBidEvent(TxID string, event BidEvent, txStateLog map[string]string) 
 			}
 	}
 	return DeliveryEvent{
-			cmpid:     event.cmpid,
-			eventType: None,
+			CampaignID: event.CampaignID,
+			EventType:  None,
 		}, TxStateUpdate{
 			key:       "",
 			value:     "",

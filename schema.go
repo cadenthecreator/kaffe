@@ -9,7 +9,7 @@ import (
 )
 
 type MessageEncoder interface {
-	EncodeMessage() sarama.ProducerMessage
+	EncodeMessage(topicPrefix string) sarama.ProducerMessage
 }
 
 type MessageDecoder interface {
@@ -21,16 +21,17 @@ type BidEventMessage struct {
 	event BidEvent
 }
 
-func (e BidEventMessage) EncodeMessage() sarama.ProducerMessage {
-	b, _ := json.Marshal(e)
-	return sarama.ProducerMessage{
+func (e *BidEventMessage) EncodeMessage(topicPrefix string) *sarama.ProducerMessage {
+	b, _ := json.Marshal(e.event)
+	return &sarama.ProducerMessage{
+		Topic: topicPrefix,
 		Key:   sarama.StringEncoder(e.txID),
 		Value: sarama.ByteEncoder(b),
 	}
 }
 
 func (e *BidEventMessage) DecodeMessage(message *sarama.ConsumerMessage) error {
-	err := json.Unmarshal(message.Value, &e)
+	err := json.Unmarshal(message.Value, &e.event)
 	if err != nil {
 		return err
 	}
@@ -43,15 +44,16 @@ type DeliveryEventMessage struct {
 	event DeliveryEvent
 }
 
-func (e DeliveryEventMessage) EncodeMessage() sarama.ProducerMessage {
+func (e *DeliveryEventMessage) EncodeMessage(topicPrefix string) *sarama.ProducerMessage {
 	b, _ := json.Marshal(e)
-	return sarama.ProducerMessage{
+	return &sarama.ProducerMessage{
+		Topic: topicPrefix,
 		Key:   sarama.StringEncoder(e.txID),
 		Value: sarama.ByteEncoder(b),
 	}
 }
 
-func (e DeliveryEventMessage) DecodeMessage(message *sarama.ConsumerMessage) error {
+func (e *DeliveryEventMessage) DecodeMessage(message *sarama.ConsumerMessage) error {
 	err := json.Unmarshal(message.Value, &e)
 	if err != nil {
 		return err
@@ -71,7 +73,7 @@ type TxState struct {
 	BidTime    time.Time `json:"bidTime"`
 }
 
-func (m TxStateMessage) EncodeMessage() sarama.ProducerMessage {
+func (m *TxStateMessage) EncodeMessage(topicPrefix string) *sarama.ProducerMessage {
 	var v sarama.Encoder
 	if m.state.IsNil() {
 		v = nil
@@ -79,13 +81,14 @@ func (m TxStateMessage) EncodeMessage() sarama.ProducerMessage {
 		b, _ := json.Marshal(m.state.ForceValue())
 		v = sarama.ByteEncoder(b)
 	}
-	return sarama.ProducerMessage{
+	return &sarama.ProducerMessage{
+		Topic: topicPrefix,
 		Key:   sarama.StringEncoder(m.txID),
 		Value: v,
 	}
 }
 
-func (m TxStateMessage) DecodeMessage(message *sarama.ConsumerMessage) error {
+func (m *TxStateMessage) DecodeMessage(message *sarama.ConsumerMessage) error {
 	m.txID = string(message.Key)
 	if message.Value == nil {
 		m.state = optional.Nil[TxState]()
