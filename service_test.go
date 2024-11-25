@@ -98,7 +98,8 @@ func TestDeliveryAggregation(t *testing.T) {
 		t.Log("Completed")
 	}()
 
-	service := NewDeliveryAggregation(configuration)
+	aggregation := NewDeliveryAggregation(configuration.StateTopic, configuration.OutputTopic)
+	transducer := NewSaramaTransducer(configuration, aggregation)
 	ctx, cancel := context.WithCancel(ctx)
 
 	consumer, err := sarama.NewConsumer(configuration.Brokers, configuration.State)
@@ -147,7 +148,7 @@ func TestDeliveryAggregation(t *testing.T) {
 		}
 	}()
 
-	service.Run(ctx)
+	transducer.Run(ctx)
 
 	assert.Equal(t, 2, eventCount)
 	assert.Equal(t, 2, stateCount)

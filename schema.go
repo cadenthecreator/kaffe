@@ -8,14 +8,6 @@ import (
 	"github.com/leavez/go-optional"
 )
 
-type MessageEncoder interface {
-	EncodeMessage(topicPrefix string) sarama.ProducerMessage
-}
-
-type MessageDecoder interface {
-	DecodeMessage(message *sarama.ConsumerMessage) error
-}
-
 type BidEventMessage struct {
 	txID  string
 	event BidEvent
