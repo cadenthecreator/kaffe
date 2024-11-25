@@ -1,4 +1,4 @@
-package kaffe
+package test_models
 
 import (
 	"github.com/leavez/go-optional"
@@ -15,16 +15,16 @@ type StateMachine struct {
 }
 
 func (s *StateMachine) LoadState(message TxStateMessage) {
-	if message.state.IsNil() {
-		delete(s.transactions, message.txID)
-	} else if message.txID != "" {
-		s.transactions[message.txID] = message.state.ForceValue()
+	if message.State.IsNil() {
+		delete(s.transactions, message.TxID)
+	} else if message.TxID != "" {
+		s.transactions[message.TxID] = message.State.ForceValue()
 	}
 }
 
 func (s *StateMachine) HandleBidEvent(message BidEventMessage) (state *TxStateMessage, output *DeliveryEventMessage, err error) {
-	txID := message.txID
-	event := message.event
+	txID := message.TxID
+	event := message.Event
 	txState, hasTx := s.transactions[txID]
 	if hasTx && event.EventType == BidResultEvent {
 		err = nil // TODO: return proper error
@@ -49,30 +49,30 @@ func (s *StateMachine) HandleBidEvent(message BidEventMessage) (state *TxStateMe
 
 func (s *StateMachine) impressionEvent(txID string, txState TxState) *DeliveryEventMessage {
 	return &DeliveryEventMessage{
-		txID:  txID,
-		event: DeliveryEvent{CampaignID: txState.CampaignID, EventType: ImpressionEvent},
+		TxID:  txID,
+		Event: DeliveryEvent{CampaignID: txState.CampaignID, EventType: ImpressionEvent},
 	}
 }
 
 func (s *StateMachine) completionEvent(txID string, txState TxState) *DeliveryEventMessage {
 	return &DeliveryEventMessage{
-		txID:  txID,
-		event: DeliveryEvent{CampaignID: txState.CampaignID, EventType: CompletionEvent},
+		TxID:  txID,
+		Event: DeliveryEvent{CampaignID: txState.CampaignID, EventType: CompletionEvent},
 	}
 }
 
 func (s *StateMachine) tombstoneTx(txID string) *TxStateMessage {
 	delete(s.transactions, txID)
 	return &TxStateMessage{
-		txID:  txID,
-		state: optional.Nil[TxState](),
+		TxID:  txID,
+		State: optional.Nil[TxState](),
 	}
 }
 
 func (s *StateMachine) updateTx(txID string, state TxState) *TxStateMessage {
 	s.transactions[txID] = state
 	return &TxStateMessage{
-		txID:  txID,
-		state: optional.New(state),
+		TxID:  txID,
+		State: optional.New(state),
 	}
 }

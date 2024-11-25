@@ -1,4 +1,4 @@
-package kaffe
+package test_models
 
 import (
 	"encoding/json"
@@ -8,39 +8,65 @@ import (
 	"github.com/leavez/go-optional"
 )
 
+type DeliveryEventType int8
+type BidEventType int8
+type TxStateUpdateType int8
+
+const (
+	// InputEvent types
+	BidResultEvent BidEventType = 0
+	PlaybackEvent  BidEventType = 1
+
+	// DeliveryEvent types
+	None            DeliveryEventType = 0
+	ImpressionEvent DeliveryEventType = 1
+	CompletionEvent DeliveryEventType = 2
+)
+
+type BidEvent struct {
+	CampaignID string       `json:"cmpid"`
+	Quart      int8         `json:"quart"`
+	EventType  BidEventType `json:"event_type"`
+}
+
+type DeliveryEvent struct {
+	CampaignID string            `json:"campaign_id"`
+	EventType  DeliveryEventType `json:"event_type"`
+}
+
 type BidEventMessage struct {
-	txID  string
-	event BidEvent
+	TxID  string
+	Event BidEvent
 }
 
 func (e *BidEventMessage) EncodeMessage(topicPrefix string) *sarama.ProducerMessage {
-	b, _ := json.Marshal(e.event)
+	b, _ := json.Marshal(e.Event)
 	return &sarama.ProducerMessage{
 		Topic: topicPrefix,
-		Key:   sarama.StringEncoder(e.txID),
+		Key:   sarama.StringEncoder(e.TxID),
 		Value: sarama.ByteEncoder(b),
 	}
 }
 
 func (e *BidEventMessage) DecodeMessage(message *sarama.ConsumerMessage) error {
-	err := json.Unmarshal(message.Value, &e.event)
+	err := json.Unmarshal(message.Value, &e.Event)
 	if err != nil {
 		return err
 	}
-	e.txID = string(message.Key)
+	e.TxID = string(message.Key)
 	return nil
 }
 
 type DeliveryEventMessage struct {
-	txID  string
-	event DeliveryEvent
+	TxID  string
+	Event DeliveryEvent
 }
 
 func (e *DeliveryEventMessage) EncodeMessage(topicPrefix string) *sarama.ProducerMessage {
 	b, _ := json.Marshal(e)
 	return &sarama.ProducerMessage{
 		Topic: topicPrefix,
-		Key:   sarama.StringEncoder(e.txID),
+		Key:   sarama.StringEncoder(e.TxID),
 		Value: sarama.ByteEncoder(b),
 	}
 }
@@ -50,13 +76,13 @@ func (e *DeliveryEventMessage) DecodeMessage(message *sarama.ConsumerMessage) er
 	if err != nil {
 		return err
 	}
-	e.txID = string(message.Key)
+	e.TxID = string(message.Key)
 	return nil
 }
 
 type TxStateMessage struct {
-	txID  string
-	state optional.Type[TxState]
+	TxID  string
+	State optional.Type[TxState]
 }
 
 type TxState struct {
@@ -67,23 +93,23 @@ type TxState struct {
 
 func (m *TxStateMessage) EncodeMessage(topicPrefix string) *sarama.ProducerMessage {
 	var v sarama.Encoder
-	if m.state.IsNil() {
+	if m.State.IsNil() {
 		v = nil
 	} else {
-		b, _ := json.Marshal(m.state.ForceValue())
+		b, _ := json.Marshal(m.State.ForceValue())
 		v = sarama.ByteEncoder(b)
 	}
 	return &sarama.ProducerMessage{
 		Topic: topicPrefix,
-		Key:   sarama.StringEncoder(m.txID),
+		Key:   sarama.StringEncoder(m.TxID),
 		Value: v,
 	}
 }
 
 func (m *TxStateMessage) DecodeMessage(message *sarama.ConsumerMessage) error {
-	m.txID = string(message.Key)
+	m.TxID = string(message.Key)
 	if message.Value == nil {
-		m.state = optional.Nil[TxState]()
+		m.State = optional.Nil[TxState]()
 		return nil
 	}
 	var state TxState
@@ -91,6 +117,6 @@ func (m *TxStateMessage) DecodeMessage(message *sarama.ConsumerMessage) error {
 	if err != nil {
 		return err
 	}
-	m.state = optional.New(state)
+	m.State = optional.New(state)
 	return nil
 }
