@@ -17,10 +17,10 @@ type StateTransducer interface {
 	ProcessMessage(input *sarama.ConsumerMessage) (messages []*sarama.ProducerMessage, err error)
 }
 
-type SaramaTransducer[T StateTransducer] struct {
+type SaramaTransducer struct {
 	configuration Configuration
 	group         sarama.ConsumerGroup
-	transducer    T
+	transducer    StateTransducer
 }
 
 type Configuration struct {
@@ -41,17 +41,16 @@ func NewConfiguartion(brokers []string, transactionalID string, namespace string
 		return config
 	}
 
-	input := newConfig()
-	input.Consumer.Offsets.Initial = sarama.OffsetOldest
-	input.Consumer.IsolationLevel = sarama.ReadCommitted
-	input.Consumer.Offsets.AutoCommit.Enable = false
-
-	state := sarama.NewConfig()
-	state.Version = sarama.V3_6_0_0
+	state := newConfig()
 	state.Consumer.Return.Errors = true
 	state.Consumer.Offsets.AutoCommit.Enable = false
 	state.Consumer.Offsets.Initial = sarama.OffsetOldest
 	state.Consumer.IsolationLevel = sarama.ReadCommitted
+
+	input := newConfig()
+	input.Consumer.Offsets.Initial = sarama.OffsetOldest
+	input.Consumer.IsolationLevel = sarama.ReadCommitted
+	input.Consumer.Offsets.AutoCommit.Enable = false
 
 	producer := newConfig()
 	producer.Net.MaxOpenRequests = 1
@@ -73,20 +72,20 @@ func NewConfiguartion(brokers []string, transactionalID string, namespace string
 	}
 }
 
-func NewSaramaTransducer[T StateTransducer](configuration Configuration, transducer T) *SaramaTransducer[T] {
+func NewSaramaTransducer(configuration Configuration, transducer StateTransducer) *SaramaTransducer {
 	group, err := sarama.NewConsumerGroup(configuration.Brokers, configuration.InputGroup, configuration.Input)
 	if err != nil {
 		log.Fatalf("Error NewConsumerGroupFromClient: %v", err)
 	}
 
-	return &SaramaTransducer[T]{
+	return &SaramaTransducer{
 		group:         group,
 		configuration: configuration,
 		transducer:    transducer,
 	}
 }
 
-func (d *SaramaTransducer[T]) Run(ctx context.Context) {
+func (d *SaramaTransducer) Run(ctx context.Context) {
 	for {
 		// `Consume` should be called inside an infinite loop, when a
 		// server-side rebalance happens, the consumer session will need to be
@@ -104,15 +103,15 @@ func (d *SaramaTransducer[T]) Run(ctx context.Context) {
 	}
 }
 
-func (d *SaramaTransducer[T]) Setup(_ sarama.ConsumerGroupSession) error {
+func (d *SaramaTransducer) Setup(_ sarama.ConsumerGroupSession) error {
 	return nil
 }
 
-func (d *SaramaTransducer[T]) Cleanup(_ sarama.ConsumerGroupSession) error {
+func (d *SaramaTransducer) Cleanup(_ sarama.ConsumerGroupSession) error {
 	return nil
 }
 
-func (d *SaramaTransducer[T]) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) (err error) {
+func (d *SaramaTransducer) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) (err error) {
 	d.loadState(claim.Partition())
 
 	tx, err := newClaimTransducer(d.configuration, d.transducer, session, claim)
@@ -129,13 +128,13 @@ func (d *SaramaTransducer[T]) ConsumeClaim(session sarama.ConsumerGroupSession, 
 	return nil
 }
 
-func (d *SaramaTransducer[T]) loadState(partition int32) {
+func (d *SaramaTransducer) loadState(partition int32) {
 	stateConsumer := d.newStaeConsumer(partition)
 	defer stateConsumer.Close()
 	d.transducer.LoadFrom(stateConsumer, partition)
 }
 
-func (d *SaramaTransducer[T]) newStaeConsumer(partition int32) *stateConsumer {
+func (d *SaramaTransducer) newStaeConsumer(partition int32) *stateConsumer {
 	client, err := sarama.NewClient(d.configuration.Brokers, d.configuration.State)
 	if err != nil {
 		log.Fatalf("NewStateConsumer NewClient %s", err)
@@ -209,18 +208,18 @@ func (c *stateConsumer) NextMessage() (m *sarama.ConsumerMessage, err error) {
 	}
 }
 
-type claimTransducer[T StateTransducer] struct {
+type claimTransducer struct {
 	configuration Configuration
-	transducer    T
+	transducer    StateTransducer
 	session       sarama.ConsumerGroupSession
 	claim         sarama.ConsumerGroupClaim
 	producer      sarama.AsyncProducer
 }
 
-func newClaimTransducer[T StateTransducer](configuraion Configuration, transducer T, session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) (result claimTransducer[T], err error) {
+func newClaimTransducer(configuraion Configuration, transducer StateTransducer, session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) (result claimTransducer, err error) {
 	producer, err := sarama.NewAsyncProducer(configuraion.Brokers, configuraion.Producer)
 	if err == nil {
-		result = claimTransducer[T]{
+		result = claimTransducer{
 			configuration: configuraion,
 			transducer:    transducer,
 			session:       session,
@@ -231,7 +230,7 @@ func newClaimTransducer[T StateTransducer](configuraion Configuration, transduce
 	return
 }
 
-func (c *claimTransducer[T]) GetProducer() (producer sarama.AsyncProducer, err error) {
+func (c *claimTransducer) GetProducer() (producer sarama.AsyncProducer, err error) {
 	if c.producer != nil {
 		if c.producer.TxnStatus()&sarama.ProducerTxnFlagInError != 0 {
 			c.producer.Close()
@@ -246,7 +245,7 @@ func (c *claimTransducer[T]) GetProducer() (producer sarama.AsyncProducer, err e
 	return
 }
 
-func (c *claimTransducer[T]) NextMessage() (m *sarama.ConsumerMessage) {
+func (c *claimTransducer) NextMessage() (m *sarama.ConsumerMessage) {
 	select {
 	case m = <-c.claim.Messages():
 		if m == nil {
@@ -260,7 +259,7 @@ func (c *claimTransducer[T]) NextMessage() (m *sarama.ConsumerMessage) {
 	}
 }
 
-func (c *claimTransducer[T]) ProcessNext() (ok bool, err error) {
+func (c *claimTransducer) ProcessNext() (ok bool, err error) {
 	producer, err := c.GetProducer()
 	if err != nil {
 		log.Printf("getProducer failed: %+v", err)
@@ -312,7 +311,7 @@ func (c *claimTransducer[T]) ProcessNext() (ok bool, err error) {
 	return true, nil
 }
 
-func (c *claimTransducer[T]) handleTxnError(message *sarama.ConsumerMessage, err error, defaulthandler func() error) {
+func (c *claimTransducer) handleTxnError(message *sarama.ConsumerMessage, err error, defaulthandler func() error) {
 	log.Printf("Message consumer: unable to process transaction: %+v", err)
 	for {
 		producer, err := c.GetProducer()
@@ -345,7 +344,7 @@ func (c *claimTransducer[T]) handleTxnError(message *sarama.ConsumerMessage, err
 	}
 }
 
-func (c *claimTransducer[T]) Close() {
+func (c *claimTransducer) Close() {
 	if c.producer != nil {
 		c.producer.Close()
 	}
